@@ -1,0 +1,149 @@
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import microsoft.exchange.webservices.data.autodiscover.IAutodiscoverRedirectionUrl;
+import microsoft.exchange.webservices.data.core.ExchangeService;
+import microsoft.exchange.webservices.data.core.enumeration.property.WellKnownFolderName;
+import microsoft.exchange.webservices.data.core.enumeration.search.LogicalOperator;
+import microsoft.exchange.webservices.data.core.enumeration.search.SortDirection;
+import microsoft.exchange.webservices.data.core.service.folder.Folder;
+import microsoft.exchange.webservices.data.core.service.item.EmailMessage;
+import microsoft.exchange.webservices.data.property.complex.EmailAddressCollection;
+import microsoft.exchange.webservices.data.core.service.item.Item;
+import microsoft.exchange.webservices.data.core.service.schema.EmailMessageSchema;
+import microsoft.exchange.webservices.data.core.service.schema.ItemSchema;
+import microsoft.exchange.webservices.data.credential.ExchangeCredentials;
+import microsoft.exchange.webservices.data.credential.WebCredentials;
+import microsoft.exchange.webservices.data.property.complex.FolderId;
+import microsoft.exchange.webservices.data.property.complex.ItemId;
+import microsoft.exchange.webservices.data.search.FindItemsResults;
+import microsoft.exchange.webservices.data.search.FolderView;
+import microsoft.exchange.webservices.data.search.ItemView;
+import microsoft.exchange.webservices.data.search.filter.SearchFilter;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.net.URI;
+import microsoft.exchange.webservices.data.property.complex.EmailAddress;
+import microsoft.exchange.webservices.data.core.PropertySet;
+import microsoft.exchange.webservices.data.core.enumeration.misc.ExchangeVersion;
+import microsoft.exchange.webservices.data.core.enumeration.misc.IdFormat;
+import microsoft.exchange.webservices.data.core.enumeration.service.ConflictResolutionMode;
+import microsoft.exchange.webservices.data.misc.id.AlternateId;
+import microsoft.exchange.webservices.data.misc.id.AlternateIdBase;
+import microsoft.exchange.webservices.data.property.complex.MimeContent;
+import microsoft.exchange.webservices.data.property.complex.MessageBody;
+import microsoft.exchange.webservices.data.core.enumeration.property.BasePropertySet;
+import microsoft.exchange.webservices.data.core.enumeration.property.*;
+import java.io.*;
+import java.util.*;
+import java.security.*;
+import java.security.cert.*;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.*;
+import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.commons.lang3.StringUtils;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.List;
+import microsoft.exchange.webservices.data.property.complex.InternetMessageHeader;
+import microsoft.exchange.webservices.data.property.complex.InternetMessageHeaderCollection;
+import microsoft.exchange.webservices.data.property.complex.ExtendedPropertyCollection;
+import microsoft.exchange.webservices.data.property.definition.ExtendedPropertyDefinition;
+
+import com.automationedge.ps.core.globalstorage.GlobalStorage;
+
+public boolean processRow(StepMetaInterface smi, StepDataInterface sdi) throws Exception {
+  if (first) {
+    first = false;
+
+
+  }
+
+  Object[] r = getRow();
+
+  if (r == null) {
+    setOutputDone();
+    return false;
+  }
+// It is always safest to call createOutputRow() to ensure that your output row's Object[] is large
+  // enough to handle any new fields you are creating in this step.
+  r = createOutputRow(r, data.outputRowMeta.size());
+
+
+logBasic("starting...");
+
+//using keytool, add the necessary security certificate in the cacerts file strored in below JAVA location
+
+String certificatesTrustStorePath=System.getenv("JAVA_HOME")+"\\jre\\lib\\security\\cacerts";
+
+System.setProperty("javax.net.ssl.trustStore", certificatesTrustStorePath);
+
+
+//mail reading
+
+	String Password = get(Fields.In, "Password").getString(r);
+	String Username = get(Fields.In, "Username").getString(r);
+	String Domain = get(Fields.In, "Domain").getString(r);
+
+  ExchangeService service = new ExchangeService(ExchangeVersion.Exchange2010_SP2);
+  service.setEnableScpLookup(true); 
+  ExchangeCredentials credentials = new WebCredentials(Username, Password, Domain);
+
+
+//change the URL as set by the outlook admin
+service.setUrl(new URI("https://outlook.globalemail.corp/ews/exchange.asmx"));
+  service.setCredentials(credentials);
+  
+sendEmail(service,r);
+
+  putRow(data.outputRowMeta, r);
+
+  return true;
+}
+
+
+
+public void sendEmail(ExchangeService service,Object[] r) throws Exception{
+
+
+String insanceID = get(Fields.In, "insanceID").getString(r);
+String Subject = get(Fields.In, "Subject").getString(r);
+String Sender = get(Fields.In, "Sender").getString(r);
+String Result = get(Fields.In, "Result").getString(r);
+String Error_mail = get(Fields.In, "Error_mail").getString(r);
+String Current = get(Fields.In, "Current").getString(r);
+
+//if attachments are there
+String destinationFilePath =  Current+"\\EmailAttachment.eml";
+
+EmailMessage msg= new EmailMessage(service);
+
+msg.setSubject("AE Request ID " + insanceID + " failed");
+
+//setBody below can accept html tags
+msg.setBody(MessageBody.getMessageBodyFromText("<b>***** DO NOT REPLY TO THIS EMAIL. This is a system generated Email *****</b><br><br>Hi Team,<br><br> AutomationEdge workflow Request ID #" + insanceID + " has completed with some error.<br><br>Please find below the details of the email and related error for further investigation. PFA source email.<br><br><b>Subject : </b> " + Subject + "<br> <b>Sender : </b>" + Sender + " <br><b>Error : </b>"+ Result + "<br>"));
+
+//add multiple recipients in To as needed
+msg.getToRecipients().add(Error_mail);
+msg.getToRecipients().add("abc@xyz.com");
+
+//add multiple cc recipients as needed
+msg.getCcRecipients().add("abc@xyz.com");
+msg.getCcRecipients().add("zyz@abc.com");
+
+//adding attachment files
+if(new File(destinationFilePath).exists())
+{
+//add multiple files as needed
+msg.getAttachments().addFileAttachment(destinationFilePath);
+msg.getAttachments().addFileAttachment(Current+"\\EmailIncidents_"+insanceID+".log");
+}
+
+//send email
+msg.send();
+
+}
